@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ORCA · 雷达点云回放</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/player.js" defer></script>
+</head>
+<body>
+  <main>
+    <header><div><span class="eyebrow">ORCA RADAR / REPLAY</span><h1>雷达点云回放</h1></div><span class="badge">本地播放器</span></header>
+    <section class="live-panel" aria-label="实时雷达">
+      <div class="live-controls">
+        <strong>实时雷达</strong><select id="live-radar" aria-label="选择实时雷达"></select>
+        <label><input id="live-configure" type="checkbox">下发 CFG 配置</label>
+        <label for="live-cfg">配置文件</label><select id="live-cfg" disabled><option value="default">按 config.py 分配</option></select>
+        <button id="live-cfg-refresh">刷新配置列表</button>
+        <label><input id="live-save" type="checkbox" checked>保存原始日志</label>
+        <button id="live-start" class="primary" disabled>开始接收</button><button id="live-stop" disabled>停止接收</button>
+        <button id="live-view" disabled>查看实时画面</button>
+      </div>
+      <p id="live-cfg-preview">未勾选下发配置：只接收数据，保留雷达当前配置。</p>
+      <p id="live-cfg-result"></p>
+      <p id="live-status" role="status">正在读取实时接收状态…</p>
+      <p>暂停画面仍继续接收和保存；恢复时显示最新帧。选择文件可切回回放。停止接收不会向雷达发送停机命令。</p>
+    </section>
+    <section class="files" aria-label="选择日志">
+      <label for="files">数据目录</label>
+      <select id="files"><option value="">选择一个录制文件…</option></select>
+      <button id="refresh" title="刷新数据目录">刷新</button>
+      <button id="open" class="primary">打开本地文件</button>
+      <input id="upload" type="file" accept=".txt,.jsonl,.ndjson" hidden>
+    </section>
+    <div class="file-info"><strong id="filename">尚未选择文件</strong><span id="status" role="status" aria-live="polite">请选择日志开始回放</span></div>
+    <section class="filters" aria-label="点云实时筛选">
+      <div class="filter-heading"><strong>点云筛选</strong><span>同时满足三个区间 · 拖动两端或输入上下限</span><button id="reset-filters" disabled>重置筛选</button></div>
+      <div id="filter-fields" class="filter-fields"></div>
+      <p>速度为带正负号的径向速度（m/s）；SNR、Noise 单位为 dB，按 0.1 dB 调整。切换文件时恢复全范围。</p>
+    </section>
+    <section class="viewer" aria-label="三维点云视图">
+      <canvas id="cloud" aria-label="三维雷达点云，可拖动旋转、滚轮缩放"></canvas>
+      <div class="view-tools"><button id="reset">重置视角</button><span>拖动旋转 · 滚轮缩放</span></div>
+      <div id="empty">打开一段录制，查看雷达点云<span>支持 .txt / .jsonl / .ndjson 日志</span></div>
+      <div class="legend"><span>径向速度 (m/s)</span><i></i><div><span>−20</span><span>0</span><span>+20</span></div></div>
+    </section>
+    <section class="transport" aria-label="播放控制">
+      <div class="timeline"><output id="elapsed">00:00.000</output><input id="seek" type="range" min="0" max="0" step="0.001" value="0" aria-label="播放进度" disabled><output id="duration">00:00.000</output></div>
+      <div class="controls">
+        <div class="buttons"><button id="prev" title="上一帧（左方向键）" disabled>上一帧</button><button id="play" class="primary" disabled>播放</button><button id="next" title="下一帧（右方向键）" disabled>下一帧</button></div>
+        <span id="stats">帧 — / — · 点数 —</span>
+        <div class="options"><label for="speed">倍速</label><select id="speed"><option value="0.25">0.25×</option><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="1.5">1.5×</option><option value="2">2×</option><option value="4">4×</option><option value="8">8×</option></select><label class="loop"><input id="loop" type="checkbox">循环</label></div>
+      </div>
+    </section>
+    <footer><span>空格 播放 / 暂停 · ← → 逐帧查看</span><span id="timestamp">接收时间 —</span></footer>
+  </main>
+</body>
+</html>
