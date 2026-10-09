@@ -19,6 +19,7 @@ import globalvar as g
 
 from utils.net_radar import radar_analysis
 from utils.live_radar import LiveRadar
+from utils.web_filter import process_points
 
 ROOT = Path(__file__).resolve().parent
 MAX_UPLOAD = 128 * 1024 * 1024
@@ -141,6 +142,14 @@ def make_handler(data_dir, initial_file=None, speed=1., loop=False,
                     self.send_json({"error": "文件不能为空，且不能超过 128 MiB"}, 413)
                     return
                 path = urlparse(self.path).path
+                if path == "/api/filter":
+                    if length > 1024 * 1024:
+                        raise ValueError("单帧滤波请求不能超过 1 MiB")
+                    payload = json.loads(self.rfile.read(length))
+                    if not isinstance(payload, dict):
+                        raise ValueError("滤波请求必须是对象")
+                    self.send_json({"points": process_points(payload["points"], payload.get("options", {}))})
+                    return
                 if path in {"/api/live/start", "/api/live/stop"} and live:
                     options = json.loads(self.rfile.read(length))
                     if not isinstance(options, dict):

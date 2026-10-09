@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from utils.live_radar import FRAME_END, FRAME_START, FrameBuffer, LiveRadar
+from utils.live_radar import FRAME_END, FRAME_START, FrameBuffer, LiveRadar, parse_config_commands
 
 
 def packet(x=1, z=3):
@@ -51,6 +51,23 @@ class FrameBufferTests(unittest.TestCase):
         self.assertLessEqual(len(buffer.buffer), 7)
 
 
+class ConfigParserTests(unittest.TestCase):
+    def test_orca_100m_header_is_not_sent_as_commands(self):
+        path = Path(__file__).resolve().parents[1] / "cfg" / "awr2944_ddm_sdk46_100m.cfg"
+        commands = parse_config_commands(path.read_text())
+        self.assertEqual(commands[0], "sensorStop")
+        self.assertEqual(commands[-1], "sensorStart")
+        self.assertFalse(any(line.startswith(("/", "*", "%")) for line in commands))
+        self.assertEqual(sum(line.startswith("cfarCfg ") for line in commands), 2)
+
+    def test_mixed_comments_and_unterminated_block(self):
+        text = "\ufeff/* header\r\n * ORCA\r\n */\r\n% note /* not a block\nsensorStop // stop\nprofileCfg /* note */ 0 77 % values\nsensorStart /* done */"
+        self.assertEqual(parse_config_commands(text), ["sensorStop", "profileCfg   0 77", "sensorStart"])
+        self.assertEqual(parse_config_commands("/* only comments */\n% rest"), [])
+        with self.assertRaisesRegex(ValueError, "未下发"):
+            parse_config_commands("sensorStop\n/* unclosed")
+
+
 class LiveReceiverTests(unittest.TestCase):
     def test_udp_decode_save_stop_restart_and_empty_frame(self):
         with TemporaryDirectory() as directory:
@@ -91,7 +108,7 @@ class LiveReceiverTests(unittest.TestCase):
             path = Path(directory) / "radar.cfg"
             path.write_text("% comment\n\nsensorStop\nsensorStart\n")
             alternative = Path(directory) / "selected.cfg"
-            alternative.write_text("% selected config\n\nprofileCfg 123\nsensorStart\n")
+            alternative.write_text("/*\n * ORCA header\n */\n% selected config\n\nprofileCfg 123 // values\nsensorStart\n")
             received = []
 
             def respond():

@@ -36,13 +36,29 @@
     <section class="filters" aria-label="点云实时筛选">
       <div class="filter-heading"><strong>点云筛选</strong><span>同时满足三个区间 · 拖动两端或输入上下限</span><button id="reset-filters" disabled>重置筛选</button></div>
       <div id="filter-fields" class="filter-fields"></div>
-      <p>速度为带正负号的径向速度（m/s）；SNR、Noise 单位为 dB，按 0.1 dB 调整。切换文件时恢复全范围。</p>
+      <div class="color-controls"><label for="speed-color-threshold">|v| 着色阈值 (m/s)</label><input id="speed-color-threshold" type="number" min="0" step="any" value="1"><span>|v| 大于阈值为红色，小于或等于阈值为绿色</span><span id="speed-color-error" role="status"></span></div>
+      <p>速度筛选及着色使用径向速度绝对值 |v|，正负速度按同一大小处理；这不是三维合速度。SNR、Noise 单位为 dB，按 0.1 dB 调整。切换文件时恢复筛选全范围，着色阈值保留。</p>
+      <details class="process-panel" open>
+        <summary>ORCA 雷达滤波（radar_process）</summary>
+        <div class="process-heading"><label><input type="checkbox" id="process-enabled">启用算法滤波</label><button id="process-reset">恢复算法默认值</button><span id="process-status" role="status">未启用</span></div>
+        <fieldset id="process-options" disabled>
+          <label>波形最大速度 (m/s)<input id="process-max_speed" type="number" min="0.001" step="0.001" value="15.365"></label>
+          <label>最大范围 (m)<input id="process-max_range" type="number" min="0.1" step="0.1" value="800"></label>
+          <label>近场 X 阈值 (m)<input id="process-min_x_abs" type="number" min="0" step="0.1" value="1"></label>
+          <label>近场 Y 阈值 (m)<input id="process-min_y_abs" type="number" min="0" step="0.1" value="0.6"></label>
+          <label>RCS 指标下限<input id="process-rcs_threshold" type="number" step="0.1" value="115"></label>
+          <label><span><input id="process-with_voxel" type="checkbox" checked>体素滤波</span>尺寸 (m)<input id="process-voxel_size" type="number" min="0.001" step="0.001" value="0.25"></label>
+          <label><span><input id="process-with_cluster" type="checkbox" checked>DBSCAN 聚类</span>半径 (m)<input id="process-eps" type="number" min="0.001" step="0.001" value="8"></label>
+          <label>聚类最少点数<input id="process-min_num" type="number" min="1" max="1200" step="1" value="15"></label>
+        </fieldset>
+        <p>先执行固定杂波、直通、RCS 指标及选中的体素/聚类滤波，再应用上面的三个区间。RCS 为算法指标，非标定后的绝对 RCS。波形最大速度请按所用 CFG 设置（100m 配置约 23.6 m/s）。算法只影响显示，原始日志不变。</p>
+      </details>
     </section>
     <section class="viewer" aria-label="三维点云视图">
       <canvas id="cloud" aria-label="三维雷达点云，可拖动旋转、滚轮缩放"></canvas>
       <div class="view-tools"><button id="reset">重置视角</button><span>拖动旋转 · 滚轮缩放</span></div>
       <div id="empty">打开一段录制，查看雷达点云<span>支持 .txt / .jsonl / .ndjson 日志</span></div>
-      <div class="legend"><span>径向速度 (m/s)</span><i></i><div><span>−20</span><span>0</span><span>+20</span></div></div>
+      <div class="legend"><span id="speed-color-label">径向速度 |v| (m/s)</span><div><i class="speed-red"></i><span id="speed-red-label">&gt; 1：红色</span></div><div><i class="speed-green"></i><span id="speed-green-label">≤ 1：绿色</span></div></div>
     </section>
     <section class="transport" aria-label="播放控制">
       <div class="timeline"><output id="elapsed">00:00.000</output><input id="seek" type="range" min="0" max="0" step="0.001" value="0" aria-label="播放进度" disabled><output id="duration">00:00.000</output></div>

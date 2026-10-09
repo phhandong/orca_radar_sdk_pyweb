@@ -16,6 +16,42 @@ FRAME_END = bytes.fromhex("0708050603040102")
 MAX_FRAME_BYTES = 1024 * 1024
 
 
+def parse_config_commands(text):
+    """Read TI '%' comments and the C-style headers used by ORCA CFGs.
+
+    Keep newlines when removing block comments so separate CLI commands never
+    merge. Validate the whole file before any command (including sensorStop)
+    is sent to the radar.
+    """
+    commands = []
+    in_block = False
+    for line in text.lstrip("\ufeff").splitlines():
+        clean = []
+        index = 0
+        while index < len(line):
+            if in_block:
+                end = line.find("*/", index)
+                if end < 0:
+                    break
+                index = end + 2
+                in_block = False
+            elif line.startswith("/*", index):
+                clean.append(" ")
+                in_block = True
+                index += 2
+            elif line[index] == "%" or line.startswith("//", index):
+                break
+            else:
+                clean.append(line[index])
+                index += 1
+        command = "".join(clean).strip()
+        if command:
+            commands.append(command)
+    if in_block:
+        raise ValueError("CFG 的 /* 注释没有对应的 */，未下发任何命令")
+    return commands
+
+
 class FrameBuffer:
     """Reassemble split/coalesced UDP payloads, including split magic words."""
 
@@ -110,8 +146,7 @@ class LiveRadar:
                 if not targets:
                     raise ValueError("未配置雷达 CFG 文件")
                 for target in targets:
-                    lines = Path(target["file"]).read_text(encoding="utf-8-sig").splitlines()
-                    lines = [line.strip() for line in lines if line.strip() and not line.lstrip().startswith("%")]
+                    lines = parse_config_commands(Path(target["file"]).read_text(encoding="utf-8-sig"))
                     if not lines:
                         raise ValueError(f"CFG 没有可下发命令: {target['file']}")
                     commands.append((target["radar"], lines))

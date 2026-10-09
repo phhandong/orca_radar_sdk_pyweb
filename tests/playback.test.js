@@ -1,7 +1,7 @@
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { Playback, frameAt, filterDomains, matchesFilters, clampFilterBound } = require("../web/player.js");
+const { Playback, frameAt, filterDomains, matchesFilters, clampFilterBound, speedColor } = require("../web/player.js");
 const frames = [0, .1, .5, 2].map(time => ({ time }));
 
 test("irregular timestamps select the last frame at or before playhead", () => {
@@ -46,7 +46,7 @@ test("filter ranges include every frame, negative velocity, and fractional endpo
   const frames = [{ points: [] }, { points: [[0, 0, 0, -1.234, 1, 2]] },
     { points: [[0, 0, 0, 2.345, 3, 1.5]] }];
   const domains = filterDomains(frames);
-  assert.deepEqual(domains, [[-1.24, 2.35], [1, 3], [1.5, 2]]);
+  assert.deepEqual(domains, [[1.23, 2.35], [1, 3], [1.5, 2]]);
   assert.ok(frames.every(f => f.points.every(p => matchesFilters(p, domains))));
   assert.deepEqual(filterDomains([{ points: [] }]), [[0, 0], [0, 0], [0, 0]]);
   assert.deepEqual(filterDomains([{ points: [[0, 0, 0, 0, 5, 5]] }]), [[0, 0], [5, 5], [5, 5]]);
@@ -54,11 +54,11 @@ test("filter ranges include every frame, negative velocity, and fractional endpo
 });
 
 test("all three inclusive ranges apply without changing raw points", () => {
-  const ranges = [[-2, 0], [1, 2], [.5, 1]];
+  const ranges = [[0, 2], [1, 2], [.5, 1]];
   const point = [1, 2, 3, -2, 1, 1];
   assert.ok(matchesFilters(point, ranges));
   assert.ok(matchesFilters([1, 2, 3, 0, 2, .5], ranges));
-  for (const [column, value] of [[3, .01], [3, -2.01], [4, .9], [4, 2.1], [5, .4], [5, 1.1]]) {
+  for (const [column, value] of [[3, 2.01], [3, -2.01], [4, .9], [4, 2.1], [5, .4], [5, 1.1]]) {
     const excluded = [...point]; excluded[column] = value;
     assert.equal(matchesFilters(excluded, ranges), false);
   }
@@ -71,4 +71,15 @@ test("range handles cannot cross or escape file bounds, equal bounds are allowed
   assert.deepEqual(clampFilterBound([2, 8], [0, 10], 0, -2), [0, 8]);
   assert.deepEqual(clampFilterBound([2, 8], [0, 10], 1, 12), [2, 10]);
   assert.deepEqual(clampFilterBound([2, 8], [0, 10], 0, NaN), [2, 8]);
+});
+
+
+test("speed magnitude selects both directions and colors strictly above threshold", () => {
+  const ranges = [[1, 2], [0, 100], [0, 100]];
+  for (const v of [-2, -1, 1, 2]) assert.ok(matchesFilters([0, 0, 0, v, 10, 10], ranges));
+  for (const v of [-2.01, -.99, 0, .99, 2.01]) assert.equal(matchesFilters([0, 0, 0, v, 10, 10], ranges), false);
+  for (const v of [-1.01, 1.01]) assert.equal(speedColor(v, 1), "#ff5252");
+  for (const v of [-1, 0, 1]) assert.equal(speedColor(v, 1), "#49d787");
+  assert.equal(speedColor(0, 0), "#49d787");
+  assert.equal(speedColor(-.01, 0), "#ff5252");
 });

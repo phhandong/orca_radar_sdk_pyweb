@@ -53,7 +53,7 @@ class Playback {
 }
 
 const FILTER_FIELDS = [
-  { key: "velocity", label: "径向速度 (m/s)", column: 3, step: .01 },
+  { key: "velocity", label: "径向速度绝对值 |v| (m/s)", column: 3, step: .01 },
   { key: "snr", label: "SNR (dB)", column: 4, step: .1 },
   { key: "noise", label: "Noise (dB)", column: 5, step: .1 },
 ];
@@ -61,7 +61,11 @@ const FILTER_FIELDS = [
 // Side-info has 0.1 dB resolution; remove float32 representation noise at boundaries.
 function filterValue(point, field) {
   const value = point[field.column];
-  return field.column >= 4 ? Math.round(value * 10) / 10 : value;
+  return field.column >= 4 ? Math.round(value * 10) / 10 : Math.abs(value);
+}
+
+function speedColor(velocity, threshold) {
+  return Math.abs(velocity) > threshold ? "#ff5252" : "#49d787";
 }
 
 function filterDomains(frames) {
@@ -96,7 +100,7 @@ function clampFilterBound(range, domain, bound, value) {
   return next;
 }
 
-if (typeof module !== "undefined") module.exports = { Playback, frameAt, filterDomains, matchesFilters, clampFilterBound };
+if (typeof module !== "undefined") module.exports = { Playback, frameAt, filterDomains, matchesFilters, clampFilterBound, speedColor };
 if (typeof document !== "undefined") startPlayer();
 
 function startPlayer() {
@@ -107,6 +111,68 @@ function startPlayer() {
   let domains = FILTER_FIELDS.map(() => [0, 0]), ranges = domains.map(pair => [...pair]), visibleCount = 0;
   let liveMode = false, livePaused = false, liveState = null, liveAction = false, liveSequence = null, initializing = true;
   let configOptions = [], configsLoading = false;
+  let speedColorThreshold = 1;
+  $("speed-color-threshold").oninput = () => {
+    const input = $("speed-color-threshold");
+    const valid = input.validity.valid && Number.isFinite(input.valueAsNumber) && input.valueAsNumber >= 0;
+    input.setAttribute("aria-invalid", String(!valid));
+    $("speed-color-error").textContent = valid ? "" : `请输入非负数；当前仍使用 ${speedColorThreshold} m/s`;
+    if (!valid) return;
+    speedColorThreshold = input.valueAsNumber;
+    $("speed-red-label").textContent = `> ${speedColorThreshold}：红色`;
+    $("speed-green-label").textContent = `≤ ${speedColorThreshold}：绿色`;
+    draw();
+  };
+  let processCache = new WeakMap(), processRevision = 0, processPending = false;
+  const processInputs = [...$("process-options").querySelectorAll("input")];
+  const processDefaults = processInputs.map(input => ({ input, value: input.value, checked: input.checked }));
+  function processStatus(message, error = false) {
+    $("process-status").textContent = message;
+    $("process-status").classList.toggle("error", error);
+  }
+  function invalidateProcess() {
+    processRevision++;
+    processCache = new WeakMap();
+    $("process-options").disabled = !$("process-enabled").checked;
+    if (!recording) processStatus($("process-enabled").checked ? "已启用，等待点云" : "未启用");
+    draw();
+  }
+  $("process-enabled").onchange = invalidateProcess;
+  processInputs.forEach(input => { input.oninput = invalidateProcess; });
+  $("process-reset").onclick = () => {
+    for (const { input, value, checked } of processDefaults) { input.value = value; input.checked = checked; }
+    invalidateProcess();
+  };
+  function processedPoints(frame) {
+    if (!$("process-enabled").checked) { processStatus("未启用"); return frame.points; }
+    const bad = processInputs.find(input => input.type === "number" && (!input.validity.valid || !Number.isFinite(input.valueAsNumber)));
+    if (bad) { processStatus("请填写有效的滤波参数", true); return []; }
+    const cached = processCache.get(frame);
+    if (cached) {
+      processStatus(cached.error ? `滤波失败：${cached.error}` : `算法保留 ${cached.points.length} / ${frame.points.length} 点`, Boolean(cached.error));
+      return cached.points;
+    }
+    processStatus("正在计算当前帧…");
+    if (!processPending) {
+      const options = Object.fromEntries(processInputs.map(input => [input.id.slice(8), input.type === "checkbox" ? input.checked : input.valueAsNumber]));
+      const revision = processRevision;
+      const cache = processCache;
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 15000);
+      processPending = true;
+      request("/api/filter", { method: "POST", headers: { "Content-Type": "application/json" },
+        signal: controller.signal, body: JSON.stringify({ points: frame.points, options }) })
+        .then(data => { if (revision === processRevision) cache.set(frame, { points: data.points }); })
+        .catch(error => {
+          if (revision === processRevision) cache.set(frame, { points: [], error: error.name === "AbortError" ? "计算超时，请减小聚类半径或关闭聚类" : error.message });
+        })
+        .finally(() => {
+          clearTimeout(timeout); processPending = false;
+          draw(); // Draw current frame; an old reply must never replace a newer frame.
+        });
+    }
+    return [];
+  }
   const filterControls = FILTER_FIELDS.map((field, index) => {
     const group = document.createElement("fieldset");
     group.className = "filter-field";
@@ -272,7 +338,7 @@ function startPlayer() {
     const frame = { timestamp: Date.now() / 1000, time: 0, sequence: 0, points: [] };
     recording = { name: "实时雷达", limits: liveState.limits, frames: [frame] };
     playback = new Playback(recording.frames);
-    domains = [[-25, 25], [0, 100], [0, 100]];
+    domains = [[0, 25], [0, 100], [0, 100]];
     ranges = domains.map(pair => [...pair]);
     filterControls.forEach(control => control.sync());
     $("files").value = "";
@@ -320,6 +386,9 @@ function startPlayer() {
     $("live-cfg-result").textContent = data.config_targets?.length
       ? `本次会话配置${data.config_status}：` + data.config_targets.map(target => `${target.radar} ← ${target.file}`).join("；")
       : "本次会话未下发配置";
+    // Reopening the page should show an already running receiver, while an
+    // explicitly loaded recording continues to be shown as file playback.
+    if (!initializing && !recording && data.running) enterLive();
     updateControls();
     displayLiveFrame();
   }
@@ -465,6 +534,29 @@ function startPlayer() {
       line([x, limits[2], limits[4]], [x, limits[3], limits[4]], "#23374a");
       line([limits[0], y, limits[4]], [limits[1], y, limits[4]], "#23374a");
     }
+    // A translucent XY reference surface; draw points afterward to keep them legible.
+    if (limits[4] <= 0 && limits[5] >= 0) {
+      const corners = [
+        [limits[0], limits[2], 0], [limits[1], limits[2], 0],
+        [limits[1], limits[3], 0], [limits[0], limits[3], 0]
+      ].map(project);
+      ctx.beginPath();
+      corners.forEach(([x, y], i) => i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y));
+      ctx.closePath();
+      ctx.fillStyle = "rgba(91, 174, 205, 0.14)";
+      ctx.fill();
+      ctx.strokeStyle = "rgba(125, 205, 230, 0.5)";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      for (let i = 1; i < 5; i++) {
+        const x = limits[0] + (limits[1] - limits[0]) * i / 5;
+        const y = limits[2] + (limits[3] - limits[2]) * i / 5;
+        line([x, limits[2], 0], [x, limits[3], 0], "rgba(125, 205, 230, 0.18)");
+        line([limits[0], y, 0], [limits[1], y, 0], "rgba(125, 205, 230, 0.18)");
+      }
+      ctx.fillStyle = "#9acbde";
+      ctx.fillText("Z = 0 m", corners[3][0] + 8, corners[3][1] - 8);
+    }
     ["X", "Y", "Z"].forEach((label, axis) => {
       const end = [...base]; end[axis] = limits[axis * 2 + 1];
       const color = ["#ef9098", "#68d5b1", "#7eaff6"][axis];
@@ -474,14 +566,13 @@ function startPlayer() {
       const start = project(base);
       if (axis === 0) { ctx.fillStyle = "#7c93aa"; ctx.fillText(base.map(v => v.toFixed(1)).join(", ") + " m", start[0] + 6, start[1] + 16); }
     });
-    const points = recording.frames[playback.index].points
+    const points = processedPoints(recording.frames[playback.index])
       .filter(point => matchesFilters(point, ranges))
       .filter(point => point.slice(0, 3).every((v, i) => v >= limits[i * 2] && v <= limits[i * 2 + 1]))
       .map(point => ({ screen: project(point.slice(0, 3)), velocity: point[3] }))
       .sort((a, b) => b.screen[2] - a.screen[2]);
     for (const { screen, velocity } of points) {
-      const hue = (1 - Math.max(0, Math.min(1, (velocity + 20) / 40))) * 240;
-      ctx.fillStyle = `hsl(${hue} 85% 62%)`;
+      ctx.fillStyle = speedColor(velocity, speedColorThreshold);
       ctx.beginPath(); ctx.arc(screen[0], screen[1], 2.8, 0, Math.PI * 2); ctx.fill();
     }
     if (!points.length) { ctx.fillStyle = "#899db4"; ctx.fillText("当前帧没有符合筛选条件且在视野范围内的目标点", 20, height - 24); }
